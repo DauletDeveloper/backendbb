@@ -63,6 +63,18 @@ const rateLimit = require("express-rate-limit");
 const {
   activateSubscription,
 } = require("../services/Admin/SubscriptionService");
+
+// ─── FIX #5: утилита — не отдаём e.message в продакшене ───────────────────
+const safeError = (res, e, status = 500) => {
+  console.error(e);
+  const message =
+    process.env.NODE_ENV === "production"
+      ? "Внутренняя ошибка сервера"
+      : e.message;
+  return res.status(status).json({ status: "error", message });
+};
+
+// ─── Rate limiters ──────────────────────────────────────────────────────────
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -102,6 +114,7 @@ const resetPasswordLimiter = rateLimit({
   message: { status: "error", message: "Слишком много попыток сброса пароля." },
 });
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
 const refreshTokens = async (res, refreshToken) => {
   const decoded = tokenService.verifyRefreshToken(refreshToken);
   const [user] = await db.select().from(users).where(eq(users.id, decoded.id));
@@ -118,18 +131,19 @@ const refreshTokens = async (res, refreshToken) => {
     maxAge: 15 * 60 * 1000,
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    // FIX #2: sameSite=none на продакшене для кросс-сайтовых запросов
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   });
   res.cookie("refreshToken", tokens.refreshToken, {
     maxAge: 30 * 24 * 60 * 60 * 1000,
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   });
-
   return { userId: user.id, tokens };
 };
 
+// ─── Middleware ─────────────────────────────────────────────────────────────
 const authMiddleware = async (req, res, next) => {
   try {
     const accessToken = req.cookies?.accessToken;
@@ -153,7 +167,9 @@ const authMiddleware = async (req, res, next) => {
             .where(eq(users.id, decoded.id));
         }
 
+        // Сохраняем роль из токена — используется в adminMiddleware
         req.userId = decoded.id;
+        req.userRole = decoded.role;
         return next();
       } catch (e) {}
     }
@@ -162,8 +178,11 @@ const authMiddleware = async (req, res, next) => {
     if (!refreshToken) return res.status(401).json({ message: "Unauthorized" });
 
     try {
-      const { userId } = await refreshTokens(res, refreshToken);
+      const { userId, tokens } = await refreshTokens(res, refreshToken);
+      // После рефреша декодируем роль из нового токена
+      const decoded = jwt.decode(tokens.accessToken);
       req.userId = userId;
+      req.userRole = decoded?.role;
       return next();
     } catch (e) {
       return res.status(401).json({ message: e.message });
@@ -173,18 +192,11 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-const adminMiddleware = async (req, res, next) => {
-  try {
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, req.userId));
-    if (!user || user.role !== "admin")
-      return res.status(403).json({ message: "Нет доступа" });
-    next();
-  } catch (e) {
-    return res.status(500).json({ message: e.message });
-  }
+// FIX #4: больше не делаем запрос к БД — роль уже есть в req.userRole из JWT
+const adminMiddleware = (req, res, next) => {
+  if (!req.userRole || req.userRole !== "admin")
+    return res.status(403).json({ message: "Нет доступа" });
+  next();
 };
 
 const validateUUID = (paramName) => (req, res, next) => {
@@ -198,6 +210,8 @@ const validateUUID = (paramName) => (req, res, next) => {
   }
   next();
 };
+
+// ─── Routes ─────────────────────────────────────────────────────────────────
 router.get(
   "/barbers/:shopId",
   publicLimiter,
@@ -205,7 +219,6 @@ router.get(
   async (req, res) => {
     try {
       const { barber } = require("../services/schema");
-      const { eq } = require("drizzle-orm");
       const barbers = await db
         .select({
           id: barber.id,
@@ -217,10 +230,11 @@ router.get(
 
       return res.status(200).json({ status: "success", data: barbers });
     } catch (e) {
-      return res.status(500).json({ status: "error", message: e.message });
+      return safeError(res, e);
     }
   },
 );
+
 router.post("/register", authLimiter, async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -229,9 +243,10 @@ router.post("/register", authLimiter, async (req, res) => {
       .status(201)
       .json({ status: "success", message: "waiting for verify" });
   } catch (error) {
-    res.status(400).json({ status: "error", message: error.message });
+    return res.status(400).json({ status: "error", message: error.message });
   }
 });
+
 router.post("/login", authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -240,19 +255,19 @@ router.post("/login", authLimiter, async (req, res) => {
       maxAge: 30 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     });
     res.cookie("accessToken", result.accessToken, {
       maxAge: 15 * 60 * 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     });
     return res
       .status(200)
       .json({ status: "success", data: { user: result.user } });
   } catch (error) {
-    res.status(400).json({ status: "error", message: error.message });
+    return res.status(400).json({ status: "error", message: error.message });
   }
 });
 
@@ -275,17 +290,17 @@ router.get("/verify/:userId", validateUUID("userId"), async (req, res) => {
       maxAge: 30 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     });
     res.cookie("accessToken", tokens.accessToken, {
       maxAge: 15 * 60 * 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     });
     res.status(200).json({ status: "success" });
   } catch (error) {
-    res.status(400).json({ status: "error", message: error.message });
+    return res.status(400).json({ status: "error", message: error.message });
   }
 });
 
@@ -298,9 +313,7 @@ router.post(
       const result = await newCodeGenerationService(email);
       return res.status(result.retryAfterMs ? 429 : 200).json(result);
     } catch (error) {
-      return res
-        .status(500)
-        .json({ success: false, message: "Internal server error." });
+      return safeError(res, error);
     }
   },
 );
@@ -311,9 +324,7 @@ router.post("/resetpassword/check", resetPasswordLimiter, async (req, res) => {
     const result = await checkCodeService(email, otp);
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
-    return res
-      .status(500)
-      .json({ success: false, message: "Internal server error." });
+    return safeError(res, error);
   }
 });
 
@@ -329,22 +340,20 @@ router.post(
       res.cookie("refreshToken", result.refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: 30 * 24 * 60 * 60 * 1000,
       });
       res.cookie("accessToken", result.accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: 15 * 60 * 1000,
       });
       return res
         .status(200)
         .json({ success: true, message: result.message, user: result.user });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ success: false, message: "Internal server error." });
+      return safeError(res, error);
     }
   },
 );
@@ -364,9 +373,10 @@ router.get("/me", authMiddleware, async (req, res) => {
       .where(eq(users.id, req.userId));
     return res.json({ user });
   } catch (e) {
-    return res.status(500).json({ message: e.message });
+    return safeError(res, e);
   }
 });
+
 router.get("/user", authMiddleware, async (req, res) => {
   try {
     const user = await db.query.users.findFirst({
@@ -389,7 +399,7 @@ router.get("/user", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Пользователь не найден" });
     return res.status(200).json({ status: "success", data: user });
   } catch (e) {
-    return res.status(500).json({ status: "error", message: e.message });
+    return safeError(res, e);
   }
 });
 
@@ -450,7 +460,7 @@ router.get(
           .json({ status: "error", message: "Барбершоп не найден" });
       return res.status(200).json({ status: "success", data: result });
     } catch (error) {
-      return res.status(400).json({ status: "error", message: error.message });
+      return safeError(res, error);
     }
   },
 );
@@ -499,7 +509,7 @@ router.get("/usershops", authMiddleware, async (req, res) => {
       .where(eq(barbershop.ownerId, req.userId));
     return res.status(200).json({ status: "success", data: userShops });
   } catch (e) {
-    return res.status(500).json({ status: "error", message: e.message });
+    return safeError(res, e);
   }
 });
 
@@ -554,7 +564,8 @@ router.get(
   },
 );
 
-router.get("/regabout/:id", authMiddleware, async (req, res) => {
+// FIX #6: добавлен validateUUID("id")
+router.get("/regabout/:id", authMiddleware, validateUUID("id"), async (req, res) => {
   try {
     const { id } = req.params;
     const [registerData] = await db
@@ -575,7 +586,7 @@ router.get("/regabout/:id", authMiddleware, async (req, res) => {
       .status(200)
       .json({ status: "success", data: registerData, barberData });
   } catch (e) {
-    res.status(500).json({ status: "error", message: e.message });
+    return safeError(res, e);
   }
 });
 
@@ -587,9 +598,10 @@ router.get("/userregisters", authMiddleware, async (req, res) => {
       .where(eq(register.userId, req.userId));
     return res.status(200).json({ status: "success", data: userRegs });
   } catch (e) {
-    return res.status(500).json({ status: "error", message: e.message });
+    return safeError(res, e);
   }
 });
+
 function calculateAsymmetricRating(currentRate, newRate, totalRatings) {
   const weight = Math.max(0.1, 1 / Math.log2(totalRatings + 2));
   const currentRating = Number(currentRate);
@@ -601,10 +613,10 @@ function calculateAsymmetricRating(currentRate, newRate, totalRatings) {
   } else {
     impact = (newRate - currentRating) * weight * 2.5;
   }
-
   const newRating = currentRating + impact;
   return Math.min(5.0, Math.max(1.0, newRating));
 }
+
 router.post(
   "/rateshop/:shopId",
   authMiddleware,
@@ -620,7 +632,7 @@ router.post(
       if (isNaN(numRate) || numRate < 1 || numRate > 5)
         return res.status(400).json({ message: "rate должен быть от 1 до 5" });
 
-      if (!registerId) 
+      if (!registerId)
         return res.status(400).json({ message: "registerId обязателен" });
 
       const [shop] = await db
@@ -646,7 +658,6 @@ router.post(
       if (existingRating)
         return res.status(403).json({ message: "Вы уже оставляли отзыв на этот барбершоп" });
 
-
       const [appointment] = await db
         .select()
         .from(register)
@@ -654,11 +665,14 @@ router.post(
           and(
             eq(register.id, Number(registerId)),
             eq(register.userId, userId),
-            eq(register.barberId, shopId),
           ),
         );
       if (!appointment)
-        return res.status(403).json({ message: "У вас нет записи в этот барбершоп" });
+        return res.status(403).json({ message: "У вас нет такой записи" });
+
+      // FIX #3: проверяем что запись именно к этому барбершопу
+      if (appointment.barberId !== shopId)
+        return res.status(403).json({ message: "Запись не относится к этому барбершопу" });
 
       if (appointment.status === "declined")
         return res.status(403).json({ message: "Нельзя оставить отзыв на отменённую запись" });
@@ -668,7 +682,6 @@ router.post(
 
       if (appointment.status !== "active")
         return res.status(403).json({ message: "Отзыв можно оставить только на активную запись" });
-
 
       const appointmentDate = new Date(appointment.date);
       const [hours, minutes, seconds] = appointment.time.split(":").map(Number);
@@ -685,6 +698,7 @@ router.post(
           message: `Отзыв можно оставить через ${remainingMinutes} мин. после времени записи`,
         });
       }
+
       const result = await db.transaction(async (tx) => {
         const [newRating] = await tx
           .insert(ratingTable)
@@ -729,8 +743,7 @@ router.post(
         shopRating: Number(result.newShopRating.toFixed(2)),
       });
     } catch (e) {
-      console.log(e);
-      return res.status(500).json({ status: "error", message: e.message });
+      return safeError(res, e);
     }
   },
 );
@@ -740,7 +753,7 @@ router.get("/favorites", authMiddleware, async (req, res) => {
     const data = await getFavoritesService(req.userId);
     res.json({ data });
   } catch (e) {
-    res.status(500).json({ message: "Ошибка сервера" });
+    return safeError(res, e);
   }
 });
 
@@ -752,7 +765,7 @@ router.post("/addFavorite", authMiddleware, async (req, res) => {
     const result = await addFavoriteService(req.userId, barberId);
     res.json(result);
   } catch (e) {
-    res.status(500).json({ message: "Ошибка сервера" });
+    return safeError(res, e);
   }
 });
 
@@ -768,7 +781,7 @@ router.delete(
       );
       res.json(result);
     } catch (e) {
-      res.status(500).json({ message: "Ошибка сервера" });
+      return safeError(res, e);
     }
   },
 );
@@ -787,7 +800,7 @@ router.get("/notifications", authMiddleware, async (req, res) => {
       message: notifications.length ? undefined : "Уведомления отсутствуют",
     });
   } catch (e) {
-    return res.status(500).json({ status: "error", message: e.message });
+    return safeError(res, e);
   }
 });
 
@@ -805,7 +818,7 @@ router.get("/getunreaded", authMiddleware, async (req, res) => {
       .status(200)
       .json({ status: "success", data: unreadNotifications });
   } catch (e) {
-    return res.status(500).json({ status: "error", message: e.message });
+    return safeError(res, e);
   }
 });
 
@@ -831,7 +844,7 @@ router.delete("/deletenotification/:id", authMiddleware, async (req, res) => {
       .status(200)
       .json({ status: "success", message: "Уведомление удалено" });
   } catch (e) {
-    return res.status(500).json({ status: "error", message: e.message });
+    return safeError(res, e);
   }
 });
 
@@ -871,7 +884,7 @@ router.get("/users", authMiddleware, adminMiddleware, async (req, res) => {
       },
     });
   } catch (e) {
-    return res.status(500).json({ status: "error", message: e.message });
+    return safeError(res, e);
   }
 });
 
@@ -892,7 +905,7 @@ router.patch(
       );
       res.json({ status: "success", data: user });
     } catch (e) {
-      res.status(500).json({ message: e.message });
+      return safeError(res, e);
     }
   },
 );
@@ -907,7 +920,7 @@ router.patch(
       const user = await unbanUserService(req.params.userId);
       res.json({ status: "success", data: user });
     } catch (e) {
-      res.status(500).json({ message: e.message });
+      return safeError(res, e);
     }
   },
 );
@@ -921,7 +934,7 @@ router.get(
       const shops = await getPendingShopsService();
       res.json({ data: shops });
     } catch (e) {
-      res.status(500).json({ message: e.message });
+      return safeError(res, e);
     }
   },
 );
@@ -936,8 +949,7 @@ router.patch(
       const shop = await approveShopService(req.params.shopId);
       res.json({ data: shop });
     } catch (e) {
-      console.log(e);
-      res.status(500).json({ message: e.message });
+      return safeError(res, e);
     }
   },
 );
@@ -952,7 +964,7 @@ router.delete(
       const result = await rejectShopService(req.params.shopId);
       res.json(result);
     } catch (e) {
-      res.status(500).json({ message: e.message });
+      return safeError(res, e);
     }
   },
 );
@@ -967,7 +979,7 @@ router.patch(
       const shop = await revokeShopService(req.params.shopId);
       res.json({ data: shop });
     } catch (e) {
-      res.status(500).json({ message: e.message });
+      return safeError(res, e);
     }
   },
 );
@@ -978,9 +990,10 @@ router.post("/sendnotif", authMiddleware, adminMiddleware, async (req, res) => {
     await sendNotificationService({ to, title, description });
     res.status(200).json({ message: "Уведомление отправлено" });
   } catch (e) {
-    res.status(500).json({ message: e.message });
+    return safeError(res, e);
   }
 });
+
 router.get("/getbarberregs/:barberId", authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
@@ -988,20 +1001,12 @@ router.get("/getbarberregs/:barberId", authMiddleware, async (req, res) => {
 
     const { barber, registers } = await getBarberRegisters(barberId);
 
-    if (!barber) {
-      throw new Error("Не найден такой барбершоп");
-    }
-
-    if (barber.ownerId !== userId) {
-      throw new Error("Нет доступа");
-    }
+    if (!barber) throw new Error("Не найден такой барбершоп");
+    if (barber.ownerId !== userId) throw new Error("Нет доступа");
 
     return res.status(200).json({
       status: "success",
-      data: {
-        barber,
-        registers,
-      },
+      data: { barber, registers },
     });
   } catch (error) {
     return res.status(400).json({
@@ -1054,17 +1059,16 @@ router.patch(
     }
   },
 );
+
 router.post(
   "/admin/subscription/activate/:shopId",
   authMiddleware,
   adminMiddleware,
   async (req, res) => {
     const { shopId } = req.params;
-
     if (!shopId) {
       return res.status(400).json({ error: "shopId обязателен" });
     }
-
     try {
       await activateSubscription(shopId);
       res.json({ success: true });
@@ -1072,53 +1076,58 @@ router.post(
       if (err.message === "Барбершоп не найден") {
         return res.status(404).json({ error: err.message });
       }
-      console.error("[activateSubscription]", err);
-      res.status(500).json({ error: "Внутренняя ошибка сервера" });
+      return safeError(res, err);
     }
   },
 );
-router.patch('/report/:ratingId', authMiddleware, async (req, res) => {
+
+// FIX #6: добавлен validateUUID("ratingId")
+router.patch("/report/:ratingId", authMiddleware, validateUUID("ratingId"), async (req, res) => {
   try {
     const userId = req.userId;
-    const { shopId } = req.body;             
+    const { shopId } = req.body;
     const { ratingId } = req.params;
 
-    const [shop] = await db.select().from(barbershop)
-      .where(eq(barbershop.id, shopId));     
+    if (!shopId)
+      return res.status(400).json({ status: "error", message: "shopId обязателен" });
 
-    if (!shop) throw new Error('Shop not found');
-    if (shop.ownerId !== userId)              
-      throw new Error('Доступно только владельцу');
+    const [shop] = await db.select().from(barbershop)
+      .where(eq(barbershop.id, shopId));
+
+    if (!shop) throw new Error("Shop not found");
+    if (shop.ownerId !== userId)
+      throw new Error("Доступно только владельцу");
 
     const [rating] = await db.select().from(ratingTable)
-      .where(eq(ratingTable.id, ratingId));    
+      .where(eq(ratingTable.id, ratingId));
 
-    if (!rating) throw new Error('Rating not found');
+    if (!rating) throw new Error("Rating not found");
     if (rating.isReported || rating.reportedCount >= 1)
-      throw new Error('Можно жаловаться только 1 раз на отзыв');
+      throw new Error("Можно жаловаться только 1 раз на отзыв");
+
     await db.update(ratingTable).set({
       isReported: true,
       reportedCount: 1,
     }).where(eq(ratingTable.id, ratingId));
 
-    res.status(200).json({ status: 'success' });
+    res.status(200).json({ status: "success" });
   } catch (err) {
-    res.status(400).json({ status: 'error', message: err.message });
+    return res.status(400).json({ status: "error", message: err.message });
   }
 });
 
-router.get('/getreports', authMiddleware, adminMiddleware, async (req, res) => {
+router.get("/getreports", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const data = await db.select().from(ratingTable)
-      .where(eq(ratingTable.isReported, true));  
-
-    res.status(200).json({ status: 'success', data });
+      .where(eq(ratingTable.isReported, true));
+    res.status(200).json({ status: "success", data });
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
+    return safeError(res, err);
   }
 });
 
-router.delete('/deletereport/:ratingId', authMiddleware, adminMiddleware, async (req, res) => {
+// FIX #6: добавлен validateUUID("ratingId")
+router.delete("/deletereport/:ratingId", authMiddleware, adminMiddleware, validateUUID("ratingId"), async (req, res) => {
   try {
     const { ratingId } = req.params;
 
@@ -1131,7 +1140,9 @@ router.delete('/deletereport/:ratingId', authMiddleware, adminMiddleware, async 
       .from(ratingTable)
       .leftJoin(barbershop, eq(barbershop.id, ratingTable.ratedId))
       .where(eq(ratingTable.id, ratingId));
+
     await db.delete(ratingTable).where(eq(ratingTable.id, ratingId));
+
     if (review?.ratedId) {
       const remaining = await db
         .select({ rate: ratingTable.rate })
@@ -1145,21 +1156,23 @@ router.delete('/deletereport/:ratingId', authMiddleware, adminMiddleware, async 
         .set({ rating: newRating })
         .where(eq(barbershop.id, review.ratedId));
     }
+
     if (review?.ownerId) {
       await sendNotificationService({
         to: review.ownerId,
         title: "Отзыв удалён модерацией",
-        description: `Модерация рассмотрела ваш запрос и удалила отзыв ${review.raterName ? ` от ${review.raterName}` : ""} и вынесла решение удалить его. Данный отзыв не будет влиять на ваш рейтинг.`,
+        description: `Модерация рассмотрела ваш запрос и удалила отзыв${review.raterName ? ` от ${review.raterName}` : ""} и вынесла решение удалить его. Данный отзыв не будет влиять на ваш рейтинг.`,
       }).catch(console.error);
     }
 
-    res.status(200).json({ status: 'success' });
+    res.status(200).json({ status: "success" });
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
+    return safeError(res, err);
   }
 });
 
-router.patch('/resolve/:ratingId', authMiddleware, adminMiddleware, async (req, res) => {
+// FIX #6: добавлен validateUUID("ratingId")
+router.patch("/resolve/:ratingId", authMiddleware, adminMiddleware, validateUUID("ratingId"), async (req, res) => {
   try {
     const { ratingId } = req.params;
 
@@ -1181,13 +1194,14 @@ router.patch('/resolve/:ratingId', authMiddleware, adminMiddleware, async (req, 
       await sendNotificationService({
         to: review.ownerId,
         title: "Решение по жалобе на отзыв",
-        description: `Модерация не увидела нарушений в отзыве ${review.raterName ? ` от ${review.raterName}` : ""}. Если хотите оспорить решение, свяжитесь с модерацией.`,
+        description: `Модерация не увидела нарушений в отзыве${review.raterName ? ` от ${review.raterName}` : ""}. Если хотите оспорить решение, свяжитесь с модерацией.`,
       }).catch(console.error);
     }
 
-    res.status(200).json({ status: 'success' });
+    res.status(200).json({ status: "success" });
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
+    return safeError(res, err);
   }
 });
+
 module.exports = router;
