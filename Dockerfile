@@ -1,14 +1,14 @@
 FROM node:20-alpine
 
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY . .
 
-RUN npx tsx --version
-
 EXPOSE 5000
 
-CMD ["node", "--require", "tsx/cjs", "app.js"]
+CMD ["node", "app.js"]
