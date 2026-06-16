@@ -64,7 +64,7 @@ const {
   activateSubscription,
 } = require("../services/Admin/SubscriptionService");
 
-// ─── FIX #5: утилита — не отдаём e.message в продакшене ───────────────────
+
 const safeError = (res, e, status = 500) => {
   console.error(e);
   const message =
@@ -74,7 +74,7 @@ const safeError = (res, e, status = 500) => {
   return res.status(status).json({ status: "error", message });
 };
 
-// ─── Rate limiters ──────────────────────────────────────────────────────────
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -114,7 +114,7 @@ const resetPasswordLimiter = rateLimit({
   message: { status: "error", message: "Слишком много попыток сброса пароля." },
 });
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+
 const refreshTokens = async (res, refreshToken) => {
   const decoded = tokenService.verifyRefreshToken(refreshToken);
   const [user] = await db.select().from(users).where(eq(users.id, decoded.id));
@@ -131,7 +131,6 @@ const refreshTokens = async (res, refreshToken) => {
     maxAge: 15 * 60 * 1000,
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    // FIX #2: sameSite=none на продакшене для кросс-сайтовых запросов
     sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   });
   res.cookie("refreshToken", tokens.refreshToken, {
@@ -143,13 +142,15 @@ const refreshTokens = async (res, refreshToken) => {
   return { userId: user.id, tokens };
 };
 
-// ─── Middleware ─────────────────────────────────────────────────────────────
+
 const authMiddleware = async (req, res, next) => {
   try {
     const accessToken = req.cookies?.accessToken;
+    const refreshToken = req.cookies?.refreshToken;
     if (accessToken) {
       try {
-        const decoded = jwt.verify(accessToken, process.env.JWT_ACCESS_SECRET);
+        const decoded = jwt.verify(accessToken, process.env.JWT_ACCESS_SECRET); // без вложенного try
+        
         const rows = await db.execute(sql`
           SELECT id, is_banned, (banned_until IS NULL OR banned_until > NOW()) as still_banned
           FROM users WHERE id = ${decoded.id}
@@ -157,7 +158,7 @@ const authMiddleware = async (req, res, next) => {
         const userData = rows[0];
         if (!userData)
           return res.status(401).json({ message: "Пользователь не найден" });
-
+    
         if (userData.is_banned) {
           if (userData.still_banned)
             return res.status(403).json({ message: "Аккаунт заблокирован" });
@@ -166,20 +167,16 @@ const authMiddleware = async (req, res, next) => {
             .set({ isBanned: false, bannedUntil: null })
             .where(eq(users.id, decoded.id));
         }
-
-        // Сохраняем роль из токена — используется в adminMiddleware
         req.userId = decoded.id;
         req.userRole = decoded.role;
         return next();
-      } catch (e) {}
+      } catch (e) {
+      }
     }
-
-    const refreshToken = req.cookies?.refreshToken;
     if (!refreshToken) return res.status(401).json({ message: "Unauthorized" });
-
+    
     try {
       const { userId, tokens } = await refreshTokens(res, refreshToken);
-      // После рефреша декодируем роль из нового токена
       const decoded = jwt.decode(tokens.accessToken);
       req.userId = userId;
       req.userRole = decoded?.role;
@@ -192,7 +189,7 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-// FIX #4: больше не делаем запрос к БД — роль уже есть в req.userRole из JWT
+
 const adminMiddleware = (req, res, next) => {
   if (!req.userRole || req.userRole !== "admin")
     return res.status(403).json({ message: "Нет доступа" });
@@ -211,7 +208,7 @@ const validateUUID = (paramName) => (req, res, next) => {
   next();
 };
 
-// ─── Routes ─────────────────────────────────────────────────────────────────
+
 router.get(
   "/barbers/:shopId",
   publicLimiter,
@@ -564,7 +561,7 @@ router.get(
   },
 );
 
-// FIX #6: добавлен validateUUID("id")
+
 router.get("/regabout/:id", authMiddleware, validateUUID("id"), async (req, res) => {
   try {
     const { id } = req.params;
@@ -670,7 +667,6 @@ router.post(
       if (!appointment)
         return res.status(403).json({ message: "У вас нет такой записи" });
 
-      // FIX #3: проверяем что запись именно к этому барбершопу
       if (appointment.barberId !== shopId)
         return res.status(403).json({ message: "Запись не относится к этому барбершопу" });
 
@@ -1081,7 +1077,6 @@ router.post(
   },
 );
 
-// FIX #6: добавлен validateUUID("ratingId")
 router.patch("/report/:ratingId", authMiddleware, validateUUID("ratingId"), async (req, res) => {
   try {
     const userId = req.userId;
@@ -1126,7 +1121,6 @@ router.get("/getreports", authMiddleware, adminMiddleware, async (req, res) => {
   }
 });
 
-// FIX #6: добавлен validateUUID("ratingId")
 router.delete("/deletereport/:ratingId", authMiddleware, adminMiddleware, validateUUID("ratingId"), async (req, res) => {
   try {
     const { ratingId } = req.params;
@@ -1171,7 +1165,7 @@ router.delete("/deletereport/:ratingId", authMiddleware, adminMiddleware, valida
   }
 });
 
-// FIX #6: добавлен validateUUID("ratingId")
+
 router.patch("/resolve/:ratingId", authMiddleware, adminMiddleware, validateUUID("ratingId"), async (req, res) => {
   try {
     const { ratingId } = req.params;
@@ -1203,5 +1197,44 @@ router.patch("/resolve/:ratingId", authMiddleware, adminMiddleware, validateUUID
     return safeError(res, err);
   }
 });
+router.patch('/reportuser/:userId', authMiddleware, validateUUID('userId'), async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { registerId } = req.body;
 
+    if (!registerId) return res.status(400).json({ message: 'registerId обязателен' });
+
+    const [reg] = await db
+      .select({ isReported: register.isReported })
+      .from(register)
+      .where(eq(register.id, registerId));
+
+    if (!reg) return res.status(404).json({ message: 'Запись не найдена' });
+    if (reg.isReported) return res.status(400).json({ message: 'Жалоба уже отправлена' });
+
+    await db.update(register).set({ isReported: true }).where(eq(register.id, registerId));
+
+    const [user] = await db
+      .select({ warnsCount: users.warnsCount })
+      .from(users)
+      .where(eq(users.id, userId));
+
+    if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
+
+    const newWarns = user.warnsCount + 1;
+    await db.update(users).set({ warnsCount: newWarns }).where(eq(users.id, userId));
+
+    if (newWarns === 3) {
+      await banUserService(userId, 'Превышен лимит предупреждений', 30 * 24 * 60);
+    } else if (newWarns === 4) {
+      await banUserService(userId, 'Повторные нарушения', 60 * 24 * 60);
+    } else if (newWarns > 4) {
+      await banUserService(userId, 'Систематические нарушения', null);
+    }
+
+    return res.status(200).json({ status: 'success', warnsCount: newWarns });
+  } catch (e) {
+    return safeError(res, e);
+  }
+});
 module.exports = router;

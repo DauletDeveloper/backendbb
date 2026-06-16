@@ -26,6 +26,7 @@ const users = pgTable("users", {
   refreshToken: text("refresh_token"),
   warnsCount: integer("warns_count").default(0),
   userCode: text("user_code"),
+  totalBanned: integer("total_banned").default(0),
   triedTrial: boolean("tried_trial").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -110,6 +111,7 @@ const register = pgTable("register", {
   status: text("status").default("active"),
   date: timestamp("date").notNull(),
   time: time("time").notNull(),
+  isReported: boolean("is_reported").default(false),
   userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),

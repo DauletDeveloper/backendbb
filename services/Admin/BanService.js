@@ -8,14 +8,20 @@ const banUserService = async (userId, reason, durationMinutes) => {
     ? new Date(Date.now() + durationMinutes * 60 * 1000)
     : null;
 
+  const [current] = await db
+    .select({ totalBanned: users.totalBanned })
+    .from(users)
+    .where(eq(users.id, userId));
+
+  if (!current) throw new Error("Пользователь не найден");
+
   const [updated] = await db
     .update(users)
-    .set({ isBanned: true, bannedUntil })
+    .set({ isBanned: true, bannedUntil, totalBanned: current.totalBanned + 1 })
     .where(eq(users.id, userId))
     .returning();
 
   if (!updated) throw new Error("Пользователь не найден");
-
   try {
     await sendNotificationService({
       to: updated.id,
