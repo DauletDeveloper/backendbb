@@ -25,6 +25,7 @@ export const users = pgTable("users", {
   mobileNumber: text("mobile_number"),
   refreshToken: text("refresh_token"),
   warnsCount: integer("warns_count").default(0),
+  totalBanned: integer("total_banned").default(0),
   userCode: text("user_code"),
   triedTrial: boolean("tried_trial").default(false),
   createdAt: timestamp("created_at").defaultNow(),
@@ -100,6 +101,7 @@ export const register = pgTable("register", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   status: text("status").default("active"),
   date: timestamp("date").notNull(),
+  isReported: boolean("is_reported").default(false),
   time: time("time").notNull(),
   userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
