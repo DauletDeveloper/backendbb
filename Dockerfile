@@ -7,6 +7,8 @@ RUN npm ci
 
 COPY . .
 
+RUN npx tsx --version
+
 EXPOSE 5000
 
-CMD ["npx", "tsx", "app.js"]
+CMD ["node", "--require", "tsx/cjs", "app.js"]
