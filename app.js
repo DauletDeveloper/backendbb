@@ -6,13 +6,13 @@ const router = require("./routs/rout.js");
 const db = require("./db");
 app.use(cookieParser());
 app.use(cors({
-  origin: ["https://barberbase.site", "http://localhost:3000"],
+  origin: ["https://barberbase.site"],
   credentials: true,
   exposedHeaders: ["set-cookie"],
 }));
 app.use(express.json());
 app.use("/api", router);
-const PORT = process.env.PORT || 5050;
+const PORT = process.env.PORT || 8080;
 function launchServer() {
   try {
     app.listen(PORT, () => {
