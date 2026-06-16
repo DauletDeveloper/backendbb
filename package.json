@@ -1,7 +1,7 @@
 {
   "scripts": {
     "dev": "npx tsx --watch app.js",
-    "start": "node app.js"
+    "start": "npx tsx app.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -17,11 +17,11 @@
     "nodecron": "^0.2.0",
     "nodemailer": "^8.0.10",
     "pg": "^8.21.0",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "tsx": "^4.22.4"
   },
   "devDependencies": {
     "@types/pg": "^8.20.0",
-    "drizzle-kit": "^0.31.10",
-    "tsx": "^4.22.4"
+    "drizzle-kit": "^0.31.10"
   }
 }
