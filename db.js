@@ -1,7 +1,7 @@
 const { drizzle } = require("drizzle-orm/postgres-js");
 const postgres = require("postgres");
 require("dotenv/config");
-const schema = require("./src/db/schema.js");
+const schema = require("./services/schema.js");
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
