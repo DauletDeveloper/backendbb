@@ -7,7 +7,7 @@ RUN npm install
 
 COPY . .
 
+RUN npx tsc --allowJs --outDir dist --module commonjs --target ES2020 --moduleResolution node --esModuleInterop true app.js
+
 EXPOSE 8080
-
-
-CMD ["npx", "tsx", "app.js"]
+CMD ["node", "dist/app.js"]
