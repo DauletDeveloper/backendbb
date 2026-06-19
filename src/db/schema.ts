@@ -39,7 +39,6 @@ export const notification = pgTable("notification", {
   to: uuid("to").references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").defaultNow(),
 });
- 
 
 export const barbershop = pgTable("barbershop", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -53,7 +52,6 @@ export const barbershop = pgTable("barbershop", {
   openHour: text("open_hour"),
   closeHour: text("close_hour"),
   barbersCount: integer("barbers_count").default(0),
-  registerPrice: text("register_price"),
   location: text("location"),
   lat: numeric("lat", { precision: 9, scale: 6 }),
   lng: numeric("lng", { precision: 9, scale: 6 }),
@@ -64,10 +62,11 @@ export const barbershop = pgTable("barbershop", {
 });
 
 export const barber = pgTable("barber_profile", {
-  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(), 
   name: text("name").notNull(),
+  url: text("url"),
   experienceInYears: integer("experience_in_years").notNull(),
-  shopId: uuid("shop_id")
+  barberId: uuid("barber_id")
     .references(() => barbershop.id, { onDelete: "cascade" })
     .notNull(),
 });
@@ -79,7 +78,6 @@ export const photoURL = pgTable("photo_url", {
     .references(() => barbershop.id, { onDelete: "cascade" })
     .notNull(),
 });
- 
 
 export const rating = pgTable("rate", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -94,13 +92,14 @@ export const rating = pgTable("rate", {
   ratedId: uuid("rated_id")
     .references(() => barbershop.id, { onDelete: "cascade" })
     .notNull(),
-    createdAt: timestamp("created_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
 });
  
 export const register = pgTable("register", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   status: text("status").default("active"),
   date: timestamp("date").notNull(),
+  service: text("service").notNull(),
   isReported: boolean("is_reported").default(false),
   time: time("time").notNull(),
   userId: uuid("user_id")
@@ -109,9 +108,20 @@ export const register = pgTable("register", {
   barberId: uuid("barber_id")
     .references(() => barbershop.id, { onDelete: "cascade" })
     .notNull(),
-    registerTo: integer("register_to").references(() => barber.id, { onDelete: "cascade" }).notNull(), 
+  registerTo: integer("register_to")
+    .references(() => barber.id, { onDelete: "cascade" })
+    .notNull(), 
 });
 
+export const service = pgTable("service", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  type: text("type").notNull(),
+  price: integer("price").notNull(),
+  url: text("url").notNull(),
+  barberId: uuid("barber_id")
+    .references(() => barbershop.id, { onDelete: "cascade" })
+    .notNull(),
+});
  
 export const favorites = pgTable(
   "favorites",
@@ -148,7 +158,7 @@ export const contacts = pgTable(
     barberIdIdx: index("contacts_barber_id_idx").on(table.barberId),
   })
 );
- 
+
 
 export const favoritesRelations = relations(favorites, ({ one }) => ({
   user: one(users, { fields: [favorites.userId], references: [users.id] }),
@@ -162,6 +172,7 @@ export const barbershopRelations = relations(barbershop, ({ one, many }) => ({
   owner: one(users, { fields: [barbershop.ownerId], references: [users.id] }),
   rates: many(rating),
   contacts: many(contacts),
+  services: many(service),
   photos: many(photoURL),
   registers: many(register),
   barbers: many(barber),
@@ -181,11 +192,18 @@ export const ratingRelations = relations(rating, ({ one }) => ({
     references: [barbershop.id],
   }),
 }));
- 
+
+export const serviceRelations = relations(service, ({ one }) => ({
+  barbershop: one(barbershop, {
+    fields: [service.barberId],
+    references: [barbershop.id],
+  }),
+}));
+
 export const registerRelations = relations(register, ({ one }) => ({
   user: one(users, { fields: [register.userId], references: [users.id] }),
   barbershop: one(barbershop, {
-    fields: [register.barberId],
+    fields: [register.barberId], 
     references: [barbershop.id],
   }),
   barber: one(barber, { fields: [register.registerTo], references: [barber.id] }),
@@ -200,15 +218,14 @@ export const contactsRelations = relations(contacts, ({ one }) => ({
  
 export const photoURLRelations = relations(photoURL, ({ one }) => ({
   barbershop: one(barbershop, {
-    fields: [photoURL.barberId],
+    fields: [photoURL.barberId], 
     references: [barbershop.id],
   }),
 }));
  
-
 export const barberRelations = relations(barber, ({ one }) => ({
   shop: one(barbershop, {
-    fields: [barber.shopId],
+    fields: [barber.barberId],
     references: [barbershop.id],
   }),
 }));

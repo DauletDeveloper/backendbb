@@ -16,28 +16,15 @@ const WHATSAPP_NUMBER = "877080122012";
 const TRIAL_DAYS = 30;
 
 const approveShopService = async (shopId) => {
-  const [shop] = await db
-    .select()
-    .from(barbershop)
-    .where(eq(barbershop.id, shopId));
-
+  const [shop] = await db.select().from(barbershop).where(eq(barbershop.id, shopId));
   if (!shop) throw new Error("Барбершоп не найден");
   if (!shop.ownerId) throw new Error("Айди пользователя нет");
-  const [owner] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, shop.ownerId));
 
+  const [owner] = await db.select().from(users).where(eq(users.id, shop.ownerId));
   if (!owner) throw new Error("Владелец не найден");
-  
-  const result = await db.execute(
-    sql`SELECT NOW() AT TIME ZONE 'Asia/Almaty' AS now`
-  );
-  const nowKZ = new Date(result[0].now);
 
-  let shopUpdate;
-  let emailSubject;
-  let emailHtml;
+  const result = await db.execute(sql`SELECT NOW() AT TIME ZONE 'Asia/Almaty' AS now`);
+  const nowKZ = new Date(result[0].now);
 
   if (owner.triedTrial) {
     const [updated] = await db
@@ -45,30 +32,40 @@ const approveShopService = async (shopId) => {
       .set({ isVerified: false, subscriptionStatus: "awaiting" })
       .where(eq(barbershop.id, shopId))
       .returning();
-    try { await sendNotificationService({ to: updated.ownerId, title: `Оплатите подписку за ваш барбершоп ${updated.name}. Цена 5000 тенге в месяц. Для оплаты свяжитесь с администратором через WhatsApp +77080122012` }); } catch (err) { throw err; }
-    return updated; 
-  }
- else {
-    const trialEndsAt = new Date(nowKZ);
-    trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_DAYS);
-    await db
-      .update(users)
-      .set({ triedTrial: true })
-      .where(eq(users.id, shop.ownerId));
-    shopUpdate = {
-      isVerified: true,
-      subscriptionStatus: "trial",
-      trialEndsAt,
-    };
 
-    const endsStr = trialEndsAt.toLocaleDateString("ru-RU", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
+    await sendNotificationService({
+      to: updated.ownerId,
+      title: `Оплатите подписку за ваш барбершоп ${updated.name}. Цена 5000 тенге в месяц. Для оплаты свяжитесь с администратором через WhatsApp +77080122012`,
     });
 
-    emailSubject = `Барбершоп "${shop.name}" одобрен пробный период активен`;
-    emailHtml = `
+    return updated;
+  }
+  const trialEndsAt = new Date(nowKZ);
+  trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_DAYS);
+
+  await db.update(users).set({ triedTrial: true }).where(eq(users.id, shop.ownerId));
+
+  const [updated] = await db
+    .update(barbershop)
+    .set({ isVerified: true, subscriptionStatus: "trial", trialEndsAt })
+    .where(eq(barbershop.id, shopId))
+    .returning();
+
+  const endsStr = trialEndsAt.toLocaleDateString("ru-RU", {
+    day: "numeric", month: "long", year: "numeric",
+  });
+
+  await sendNotificationService({
+    to: updated.ownerId,
+    title: "Ваш барбершоп одобрен",
+    description: `Барбершоп "${updated.name}" успешно прошёл модерацию. Пробный период: ${TRIAL_DAYS} дней.`,
+  });
+
+  await transporter.sendMail({
+    from: `"BarberBase" <${process.env.EMAIL_USER}>`,
+    to: owner.email,
+    subject: `Барбершоп "${shop.name}" одобрен — пробный период активен`,
+    html: `
       <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;background:#0a0a0a;color:#fafafa;border-radius:12px;overflow:hidden;">
         <div style="background:#18181b;padding:28px 32px;border-bottom:1px solid #27272a;">
           <h1 style="margin:0;font-size:20px;color:#fafafa;">BarberBase</h1>
@@ -76,7 +73,7 @@ const approveShopService = async (shopId) => {
         </div>
         <div style="padding:28px 32px;">
           <p style="font-size:15px;color:#a1a1aa;margin:0 0 20px;">
-            Барбершоп <strong style="color:#fafafa;">${shop.name}</strong> успешно прошёл модерацию и теперь отображается в каталоге 🎉
+            Барбершоп <strong style="color:#fafafa;">${shop.name}</strong> успешно прошёл модерацию 🎉
           </p>
           <div style="background:#18181b;border:1px solid #27272a;border-radius:10px;padding:20px;margin-bottom:24px;">
             <table style="width:100%;border-collapse:collapse;">
@@ -95,58 +92,34 @@ const approveShopService = async (shopId) => {
             </table>
           </div>
           <p style="font-size:13px;color:#71717a;line-height:1.6;margin:0;">
-            Ваша пробная подписка окончится через <strong style="color:#fafafa;">${TRIAL_DAYS} дней</strong>. 
-            После этого для продолжения работы потребуется оплата. 
-            Свяжитесь с нами заранее через WhatsApp: <strong style="color:#fafafa;">+7 708 012 2012</strong>
+            Пробная подписка окончится через <strong style="color:#fafafa;">${TRIAL_DAYS} дней</strong>. 
+            Свяжитесь с нами заранее: <strong style="color:#fafafa;">+7 708 012 2012</strong>
           </p>
         </div>
-      </div>`;
-  }
-
-  const [updated] = await db
-    .update(barbershop)
-    .set(shopUpdate)
-    .where(eq(barbershop.id, shopId))
-    .returning();
-
-  await sendNotificationService({
-    to: updated.ownerId,
-    from: process.env.EMAIL_USER,
-    title: owner.triedTrial
-      ? "Оплатите подписку"
-      : "Ваш барбершоп одобрен",
-    description: owner.triedTrial
-      ? `Барбершоп "${updated.name}" одобрен. Свяжитесь с модератором для оплаты подписки.`
-      : `Барбершоп "${updated.name}" успешно прошёл модерацию. Пробный период: ${TRIAL_DAYS} дней.`,
-  });
-
-  await transporter.sendMail({
-    from: `"BarberBase" <${process.env.EMAIL_USER}>`,
-    to: owner.email,
-    subject: emailSubject,
-    html: emailHtml,
+      </div>`,
   });
 
   return updated;
 };
-
 const getPendingShopsService = async () => {
-  const shops = await db
-    .select({
-      id: barbershop.id,
-      name: barbershop.name,
-      description: barbershop.description,
-      location: barbershop.location,
-      createdAt: barbershop.createdAt,
-      ownerName: users.name,
-      ownerEmail: users.email,
-    })
-    .from(barbershop)
-    .leftJoin(users, eq(barbershop.ownerId, users.id))
-    .where(eq(barbershop.isVerified, false));
+  const shops = await db.query.barbershop.findMany({
+    where: eq(barbershop.isVerified, false),
+    with: {
+      owner: {
+        columns: {
+          name: true,
+          email: true,
+        },
+      },
+      barbers: true,
+      services: true,
+      photos: true,
+    },
+  });
 
   return shops;
 };
+
 
 
 const rejectShopService = async (shopId) => {

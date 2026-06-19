@@ -92,7 +92,7 @@ const publicLimiter = rateLimit({
 
 const registerShopLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 10,
+  max: 4,
   message: {
     status: "error",
     message: "Слишком много записей. Повторите через час.",
@@ -114,6 +114,11 @@ const resetPasswordLimiter = rateLimit({
   message: { status: "error", message: "Слишком много попыток сброса пароля." },
 });
 
+const addShopLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  message: { status: "error", message: "Слишком много попыток добавления пароля." },
+});
 
 const refreshTokens = async (res, refreshToken) => {
   const decoded = tokenService.verifyRefreshToken(refreshToken);
@@ -223,7 +228,7 @@ router.get(
           experienceInYears: barber.experienceInYears,
         })
         .from(barber)
-        .where(eq(barber.shopId, req.params.shopId));
+        .where(eq(barber.barberId, req.params.shopId));
 
       return res.status(200).json({ status: "success", data: barbers });
     } catch (e) {
@@ -462,7 +467,7 @@ router.get(
   },
 );
 
-router.post("/upload", authMiddleware, async (req, res) => {
+router.post("/upload", addShopLimiter, authMiddleware, async (req, res) => {
   try {
     const result = await AddShopService(req);
     return res.status(200).json({
@@ -541,8 +546,8 @@ router.get(
         .json({ message: "Некорректный формат даты. Ожидается YYYY-MM-DD" });
     }
 
-    const startOfDay = new Date(date + "T00:00:00.000Z");
-    const endOfDay = new Date(date + "T23:59:59.999Z");
+    const startOfDay = new Date(date + "T00:00:00.000+05:00");
+    const endOfDay = new Date(date + "T23:59:59.999+05:00");
 
     const registers = await db.query.register.findMany({
       where: and(
@@ -1237,4 +1242,5 @@ router.patch('/reportuser/:userId', authMiddleware, validateUUID('userId'), asyn
     return safeError(res, e);
   }
 });
+
 module.exports = router;

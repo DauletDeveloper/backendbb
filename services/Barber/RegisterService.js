@@ -11,21 +11,22 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS,
   },
 });
- 
+
 const RegisterShopService = async (req) => {
-  const { barberId, date, time, masterId } = req.body; 
+  const { barberId, date, time, masterId, service } = req.body; 
   const userId = req.userId;
-  if (!barberId || !date || !time )
-    throw new Error('барберщоп, дата, время записи обязательны');
+  if (!barberId || !date || !time || !service )
+    throw new Error('барберщоп, дата, время записи, сервис обязательны');
   if (!masterId) throw new Error("Выберите мастера")
-  const [{ now }] = await db.execute(sql`SELECT NOW() AT TIME ZONE 'Asia/Almaty' AS now`);
+    const [{ now }] = await db.execute(sql`SELECT NOW() AT TIME ZONE 'Asia/Almaty' AS now`);
   const nowKZ = new Date(now);
   const [hours, minutes] = time.split(':').map(Number);
   const appointmentDate = new Date(date);
   appointmentDate.setHours(hours, minutes, 0, 0);
-   
+  
+  const minBookingTime = new Date(nowKZ.getTime() + 30 * 60 * 1000);
   if (appointmentDate <= nowKZ) throw new Error('Нельзя записаться на прошедшее время');
- 
+  if (appointmentDate <= minBookingTime) throw new Error('Запись возможна минимум за 30 минут до начала');
   const maxDate = new Date(nowKZ);
   maxDate.setDate(maxDate.getDate() + 3);
   maxDate.setHours(23, 59, 59, 999);
@@ -42,11 +43,10 @@ const RegisterShopService = async (req) => {
   if (!owner) throw new Error('Владелец барбершопа не найден');
   let masterName = null;
 
-const [master] = await db
-  .select()
-  .from(barberProfile)
-  .where(and(eq(barberProfile.id, Number(masterId)), eq(barberProfile.shopId, barberId)));
-
+  const [master] = await db
+    .select()
+    .from(barberProfile)
+    .where(and(eq(barberProfile.id, Number(masterId)), eq(barberProfile.barberId, barberId)));
 if (!master) throw new Error('Барбер не найден в этом магазине');
 masterName = master.name;
 
@@ -56,9 +56,8 @@ await db.update(barbershop)
 
 const [newRegister] = await db
   .insert(register)
-  .values({ userId, barberId, date: new Date(date), time, registerTo: Number(masterId) })
+  .values({ userId, barberId, date: new Date(date), time, registerTo: Number(masterId), service })
   .returning();
-  if (!user.mobilePhone) throw new Error("Добавьте номер телефона в профиле.")
   const masterLine = masterName
     ? `<tr style="border-top:1px solid #27272a;">
         <td style="padding:8px 0;font-size:12px;color:#71717a;text-transform:uppercase;letter-spacing:0.06em;">Мастер</td>

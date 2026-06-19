@@ -57,14 +57,14 @@ const getShopsService = async ({ page = 1, location, openNow, minRating, search 
     },
   });
   let result = shops.filter(isSubscriptionActive);
-
+  
   if (minRating !== undefined) {
     const min = parseFloat(minRating);
     if (!isNaN(min)) {
       result = result.filter((s) => s.rating != null && s.rating >= min);
     }
   }
-
+  
   return { shops: result, page: pageNum, hasMore: shops.length === LIMIT };
 };
 
@@ -75,6 +75,8 @@ const getShopService = async (shopId) => {
       photos: true,
       contacts: true,
       rates: true,
+      services: true,
+      barbers: true,
     },
   });
   if (!shop) return null;

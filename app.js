@@ -6,7 +6,7 @@ const router = require("./routs/rout.js");
 const db = require("./db");
 app.use(cookieParser());
 app.use(cors({
-  origin: ["https://barberbase.site", "http://localhost:3000"],
+  origin: ["https://barberbase.site", "http://localhost:3000", "http://localhost:3001"],
   credentials: true,
   exposedHeaders: ["set-cookie"],
 }));

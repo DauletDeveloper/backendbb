@@ -12,7 +12,6 @@ const {
   time,
   unique,
 } = require("drizzle-orm/pg-core");
- 
 const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -25,8 +24,8 @@ const users = pgTable("users", {
   mobileNumber: text("mobile_number"),
   refreshToken: text("refresh_token"),
   warnsCount: integer("warns_count").default(0),
-  userCode: text("user_code"),
   totalBanned: integer("total_banned").default(0),
+  userCode: text("user_code"),
   triedTrial: boolean("tried_trial").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -39,17 +38,7 @@ const notification = pgTable("notification", {
   to: uuid("to").references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").defaultNow(),
 });
- 
-const promocode = pgTable("promo_code", {
-  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  code: text("code").notNull(),
-  discountValue: text("discount_value"),
-  usedTotal: integer("user_total").default(0),
-  maxUses: integer("max_uses").notNull(),
-  barberId: uuid("barber_id")
-  .references(() => barbershop.id, { onDelete: "cascade" })
-  .notNull(),
-})
+
 const barbershop = pgTable("barbershop", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -62,7 +51,6 @@ const barbershop = pgTable("barbershop", {
   openHour: text("open_hour"),
   closeHour: text("close_hour"),
   barbersCount: integer("barbers_count").default(0),
-  registerPrice: text("register_price"),
   location: text("location"),
   lat: numeric("lat", { precision: 9, scale: 6 }),
   lng: numeric("lng", { precision: 9, scale: 6 }),
@@ -73,10 +61,11 @@ const barbershop = pgTable("barbershop", {
 });
 
 const barber = pgTable("barber_profile", {
-  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(), 
   name: text("name").notNull(),
+  url: text("url"),
   experienceInYears: integer("experience_in_years").notNull(),
-  shopId: uuid("shop_id")
+  barberId: uuid("barber_id")
     .references(() => barbershop.id, { onDelete: "cascade" })
     .notNull(),
 });
@@ -88,7 +77,6 @@ const photoURL = pgTable("photo_url", {
     .references(() => barbershop.id, { onDelete: "cascade" })
     .notNull(),
 });
- 
 
 const rating = pgTable("rate", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -110,17 +98,28 @@ const register = pgTable("register", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   status: text("status").default("active"),
   date: timestamp("date").notNull(),
-  time: time("time").notNull(),
+  service: text("service").notNull(),
   isReported: boolean("is_reported").default(false),
+  time: time("time").notNull(),
   userId: uuid("user_id")
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
   barberId: uuid("barber_id")
     .references(() => barbershop.id, { onDelete: "cascade" })
     .notNull(),
-    registerTo: uuid("register_to")
-    .references(() => barber.id, { onDelete: "cascade" }) 
+  registerTo: integer("register_to")
+    .references(() => barber.id, { onDelete: "cascade" })
     .notNull(), 
+});
+
+const service = pgTable("service", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  type: text("type").notNull(),
+  price: integer("price").notNull(),
+  url: text("url").notNull(),
+  barberId: uuid("barber_id")
+    .references(() => barbershop.id, { onDelete: "cascade" })
+    .notNull(),
 });
  
 const favorites = pgTable(
@@ -158,7 +157,7 @@ const contacts = pgTable(
     barberIdIdx: index("contacts_barber_id_idx").on(table.barberId),
   })
 );
- 
+
 
 const favoritesRelations = relations(favorites, ({ one }) => ({
   user: one(users, { fields: [favorites.userId], references: [users.id] }),
@@ -172,6 +171,7 @@ const barbershopRelations = relations(barbershop, ({ one, many }) => ({
   owner: one(users, { fields: [barbershop.ownerId], references: [users.id] }),
   rates: many(rating),
   contacts: many(contacts),
+  services: many(service),
   photos: many(photoURL),
   registers: many(register),
   barbers: many(barber),
@@ -191,13 +191,21 @@ const ratingRelations = relations(rating, ({ one }) => ({
     references: [barbershop.id],
   }),
 }));
- 
+
+const serviceRelations = relations(service, ({ one }) => ({
+  barbershop: one(barbershop, {
+    fields: [service.barberId],
+    references: [barbershop.id],
+  }),
+}));
+
 const registerRelations = relations(register, ({ one }) => ({
   user: one(users, { fields: [register.userId], references: [users.id] }),
   barbershop: one(barbershop, {
-    fields: [register.barberId],
+    fields: [register.barberId], 
     references: [barbershop.id],
   }),
+  barber: one(barber, { fields: [register.registerTo], references: [barber.id] }),
 }));
  
 const contactsRelations = relations(contacts, ({ one }) => ({
@@ -209,16 +217,27 @@ const contactsRelations = relations(contacts, ({ one }) => ({
  
 const photoURLRelations = relations(photoURL, ({ one }) => ({
   barbershop: one(barbershop, {
-    fields: [photoURL.barberId],
+    fields: [photoURL.barberId], 
     references: [barbershop.id],
   }),
 }));
  
-
 const barberRelations = relations(barber, ({ one }) => ({
   shop: one(barbershop, {
-    fields: [barber.shopId],
+    fields: [barber.barberId],
     references: [barbershop.id],
   }),
 }));
-module.exports = { users, barber, barbershop, photoURL, contacts, register, favorites, notification, rating }
+
+module.exports = { 
+  users, 
+  barber, 
+  barbershop, 
+  photoURL, 
+  contacts, 
+  register, 
+  favorites, 
+  notification, 
+  rating, 
+  service,
+};
