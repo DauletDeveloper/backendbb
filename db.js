@@ -1,7 +1,7 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
-import "dotenv/config";
-import * as schema from "./src/db/schema.ts"; 
+const { drizzle } = require("drizzle-orm/postgres-js");
+const postgres = require("postgres");
+require("dotenv/config");
+const schema = require("./src/db/schema.js");
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -9,4 +9,6 @@ if (!connectionString) {
 }
 
 const client = postgres(connectionString, { prepare: false });
-export const db = drizzle(client, { schema }); 
+const db = drizzle(client, { schema });
+
+module.exports = { db };
