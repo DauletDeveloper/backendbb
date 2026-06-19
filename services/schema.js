@@ -240,4 +240,13 @@ module.exports = {
   notification, 
   rating, 
   service,
+  usersRelations,
+  barbershopRelations,
+  ratingRelations,
+  registerRelations,
+  serviceRelations,
+  favoritesRelations,
+  contactsRelations,
+  photoURLRelations,
+  barberRelations,
 };
