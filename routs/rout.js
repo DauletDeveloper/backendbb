@@ -519,7 +519,6 @@ router.post(
   "/newRegister",
   authMiddleware,
   registerShopLimiter,
-  requireActiveSubscription,
   async (req, res) => {
     try {
       const result = await RegisterShopService(req);
