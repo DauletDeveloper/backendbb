@@ -2,6 +2,7 @@ const express = require("express");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const app = express();
+app.set("trust proxy", 1);
 const router = require("./routs/rout.js");
 const db = require("./db");
 
