@@ -1241,5 +1241,29 @@ router.patch('/reportuser/:userId', authMiddleware, validateUUID('userId'), asyn
     return safeError(res, e);
   }
 });
+router.get('/admin/getdashboarddata', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const [
+      [{ count: usersCount }],
+      [{ count: barbershopsCount }],
+      [{ count: registersCount }],
+    ] = await Promise.all([
+      db.select({ count: count() }).from(users),
+      db.select({ count: count() }).from(barbershop),
+      db.select({ count: count() }).from(register),
+    ]);
 
+    return res.status(200).json({
+      success: true,
+      data: {
+        usersCount,
+        barbershopsCount,
+        registersCount,
+      },
+    });
+  } catch (error) {
+    console.error('Dashboard data error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
 module.exports = router;
