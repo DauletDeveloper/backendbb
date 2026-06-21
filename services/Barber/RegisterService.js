@@ -23,7 +23,6 @@ const RegisterShopService = async (req) => {
   const [hours, minutes] = time.split(':').map(Number);
   const appointmentDate = new Date(date);
   appointmentDate.setHours(hours, minutes, 0, 0);
-  
   const minBookingTime = new Date(nowKZ.getTime() + 30 * 60 * 1000);
   if (appointmentDate <= nowKZ) throw new Error('Нельзя записаться на прошедшее время');
   if (appointmentDate <= minBookingTime) throw new Error('Запись возможна минимум за 30 минут до начала');

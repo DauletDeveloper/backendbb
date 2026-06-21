@@ -28,6 +28,7 @@ const users = pgTable("users", {
   userCode: text("user_code"),
   triedTrial: boolean("tried_trial").default(false),
   createdAt: timestamp("created_at").defaultNow(),
+  pendingEmail: text("pending_email"),
 });
  
 const notification = pgTable("notification", {
@@ -240,4 +241,13 @@ module.exports = {
   notification, 
   rating, 
   service,
+  usersRelations,
+  barbershopRelations,
+  ratingRelations,
+  registerRelations,
+  serviceRelations,
+  favoritesRelations,
+  contactsRelations,
+  photoURLRelations,
+  barberRelations,
 };

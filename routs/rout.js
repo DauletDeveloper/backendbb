@@ -36,6 +36,7 @@ const {
 const {
   EditUserService,
   EditEmailService,
+  VerifyEmailService,
 } = require("../services/Register/EditUserService.js");
 const {
   resetPasswordService,
@@ -154,8 +155,8 @@ const authMiddleware = async (req, res, next) => {
     const refreshToken = req.cookies?.refreshToken;
     if (accessToken) {
       try {
-        const decoded = jwt.verify(accessToken, process.env.JWT_ACCESS_SECRET); // без вложенного try
-        
+        const decoded = jwt.verify(accessToken, process.env.JWT_ACCESS_SECRET); 
+        console.log("decoded:", decoded);
         const rows = await db.execute(sql`
           SELECT id, is_banned, (banned_until IS NULL OR banned_until > NOW()) as still_banned
           FROM users WHERE id = ${decoded.id}
@@ -182,7 +183,6 @@ const authMiddleware = async (req, res, next) => {
     
     try {
       const { userId, tokens } = await refreshTokens(res, refreshToken);
-      const decoded = jwt.decode(tokens.accessToken);
       req.userId = userId;
       req.userRole = decoded?.role;
       return next();
@@ -237,13 +237,17 @@ router.get(
   },
 );
 
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 router.post("/register", authLimiter, async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    await RegisterService(name, email, password);
-    return res
-      .status(201)
-      .json({ status: "success", message: "waiting for verify" });
+    const cleanEmail = String(email).trim().toLowerCase();
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ status: "error", message: "Некорректный email" });
+    }
+    await RegisterService(name, cleanEmail, password);
+    return res.status(201).json({ status: "success", message: "waiting for verify" });
   } catch (error) {
     return res.status(400).json({ status: "error", message: error.message });
   }
@@ -252,7 +256,8 @@ router.post("/register", authLimiter, async (req, res) => {
 router.post("/login", authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
-    const result = await LoginService(email, password);
+    const cleanEmail = String(email).trim().toLowerCase()
+    const result = await LoginService(cleanEmail, password);
     res.cookie("refreshToken", result.refreshToken, {
       maxAge: 30 * 24 * 60 * 60 * 1000,
       httpOnly: true,
@@ -424,7 +429,14 @@ router.patch("/user/email", authMiddleware, emailLimiter, async (req, res) => {
     return res.status(400).json({ status: "error", message: e.message });
   }
 });
-
+router.post("/user/email/verify", authMiddleware, async (req, res) => {
+  try {
+    await VerifyEmailService(req);
+    return res.status(200).json({ status: "success", message: "Email подтверждён" });
+  } catch (e) {
+    return res.status(400).json({ status: "error", message: e.message });
+  }
+});
 router.get("/getshops", publicLimiter, async (req, res) => {
   try {
     const {
@@ -519,7 +531,6 @@ router.post(
   "/newRegister",
   authMiddleware,
   registerShopLimiter,
-  requireActiveSubscription,
   async (req, res) => {
     try {
       const result = await RegisterShopService(req);
@@ -1242,5 +1253,29 @@ router.patch('/reportuser/:userId', authMiddleware, validateUUID('userId'), asyn
     return safeError(res, e);
   }
 });
+router.get('/admin/getdashboarddata', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const [
+      [{ count: usersCount }],
+      [{ count: barbershopsCount }],
+      [{ count: registersCount }],
+    ] = await Promise.all([
+      db.select({ count: count() }).from(users),
+      db.select({ count: count() }).from(barbershop),
+      db.select({ count: count() }).from(register),
+    ]);
 
+    return res.status(200).json({
+      success: true,
+      data: {
+        usersCount,
+        barbershopsCount,
+        registersCount,
+      },
+    });
+  } catch (error) {
+    console.error('Dashboard data error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
 module.exports = router;
