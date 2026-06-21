@@ -1278,4 +1278,5 @@ router.get('/admin/getdashboarddata', authMiddleware, adminMiddleware, async (re
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
+
 module.exports = router;
