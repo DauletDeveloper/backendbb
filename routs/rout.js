@@ -443,6 +443,7 @@ router.get("/user", authMiddleware, async (req, res) => {
       where: eq(users.id, req.userId),
       columns: {
         name: true,
+        id: true,
         email: true,
         role: true,
         isVerified: true,
