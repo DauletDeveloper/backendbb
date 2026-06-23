@@ -7,7 +7,7 @@ const router = require("./routs/rout.js");
 const db = require("./db");
 
 app.use(cors({
-  origin: "https://barberbase.site",
+  origin: ["https://barberbase.site"],
   credentials: true,
 }));
 

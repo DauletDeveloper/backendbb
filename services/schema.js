@@ -103,8 +103,7 @@ const register = pgTable("register", {
   isReported: boolean("is_reported").default(false),
   time: time("time").notNull(),
   userId: uuid("user_id")
-    .references(() => users.id, { onDelete: "cascade" })
-    .notNull(),
+    .references(() => users.id, { onDelete: "cascade" }),
   barberId: uuid("barber_id")
     .references(() => barbershop.id, { onDelete: "cascade" })
     .notNull(),

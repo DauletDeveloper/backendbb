@@ -21,7 +21,6 @@ const isSubscriptionActive = (shop) => {
 
   return false;
 };
-
 const getShopsService = async ({ page = 1, location, openNow, minRating, search }) => {
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const offset = (pageNum - 1) * LIMIT;
@@ -57,7 +56,6 @@ const getShopsService = async ({ page = 1, location, openNow, minRating, search 
     },
   });
   let result = shops.filter(isSubscriptionActive);
-  
   if (minRating !== undefined) {
     const min = parseFloat(minRating);
     if (!isNaN(min)) {

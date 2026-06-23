@@ -78,6 +78,8 @@ const safeError = (res, e, status = 500) => {
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  standardHeaders: true, 
+  legacyHeaders: false,
   max: 10,
   message: {
     status: "error",
@@ -87,13 +89,17 @@ const authLimiter = rateLimit({
 
 const publicLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
+  standardHeaders: true, 
+  legacyHeaders: false,
   max: 60,
   message: { status: "error", message: "Слишком много запросов." },
 });
 
 const registerShopLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 4,
+  windowMs: 30 * 60 * 1000,
+  standardHeaders: true, 
+  legacyHeaders: false,
+  max: 3,
   message: {
     status: "error",
     message: "Слишком много записей. Повторите через час.",
@@ -102,6 +108,8 @@ const registerShopLimiter = rateLimit({
 
 const emailLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
+  standardHeaders: true, 
+  legacyHeaders: false,
   max: 5,
   message: {
     status: "error",
@@ -111,12 +119,16 @@ const emailLimiter = rateLimit({
 
 const resetPasswordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  standardHeaders: true, 
+  legacyHeaders: false,
   max: 5,
   message: { status: "error", message: "Слишком много попыток сброса пароля." },
 });
 
 const addShopLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
+  standardHeaders: true, 
+  legacyHeaders: false,
   max: 3,
   message: { status: "error", message: "Слишком много попыток добавления пароля." },
 });
@@ -147,7 +159,49 @@ const refreshTokens = async (res, refreshToken) => {
   });
   return { userId: user.id, tokens };
 };
+const registerMiddleware = async (req, res, next) => {
+  try {
+    const accessToken = req.cookies?.accessToken;
+    const refreshToken = req.cookies?.refreshToken;
 
+    if (accessToken) {
+      try {
+        const decoded = jwt.verify(accessToken, process.env.JWT_ACCESS_SECRET);
+        const rows = await db.execute(sql`
+          SELECT id, is_banned, (banned_until IS NULL OR banned_until > NOW()) as still_banned
+          FROM users WHERE id = ${decoded.id}
+        `);
+        const userData = rows[0];
+        if (userData?.is_banned) {
+          if (userData.still_banned)
+            return res.status(403).json({ message: "Аккаунт заблокирован" });
+          await db
+            .update(users)
+            .set({ isBanned: false, bannedUntil: null })
+            .where(eq(users.id, decoded.id));
+        }
+        req.userId = decoded.id;
+        req.userRole = decoded.role; 
+        return next();
+      } catch (e) {
+        console.error("Access token error:", e.message);
+      }
+    }
+
+
+    try {
+      const { userId, userRole } = await refreshTokens(res, refreshToken);
+      req.userId = userId;
+      req.userRole = userRole; 
+      return next();
+    } catch (e) {
+      req.userId = null; 
+      return next(); 
+    }
+  } catch (e) {
+    return res.status(401).json({ message: e.message });
+  }
+};
 
 const authMiddleware = async (req, res, next) => {
   try {
@@ -156,7 +210,6 @@ const authMiddleware = async (req, res, next) => {
     if (accessToken) {
       try {
         const decoded = jwt.verify(accessToken, process.env.JWT_ACCESS_SECRET); 
-        console.log("decoded:", decoded);
         const rows = await db.execute(sql`
           SELECT id, is_banned, (banned_until IS NULL OR banned_until > NOW()) as still_banned
           FROM users WHERE id = ${decoded.id}
@@ -529,7 +582,7 @@ router.get("/usershops", authMiddleware, async (req, res) => {
 
 router.post(
   "/newRegister",
-  authMiddleware,
+  registerMiddleware,
   registerShopLimiter,
   async (req, res) => {
     try {
@@ -859,7 +912,30 @@ router.delete("/deletenotification/:id", authMiddleware, async (req, res) => {
     return safeError(res, e);
   }
 });
+router.get('/getuserfillials/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { location, search, minRating } = req.query;
 
+    const filters = [eq(barbershop.ownerId, userId)];
+    if (location) filters.push(ilike(barbershop.location, `%${location}%`));
+    if (search) filters.push(ilike(barbershop.name, `%${search}%`));
+    if (minRating) {
+      const min = parseFloat(minRating);
+      if (!isNaN(min)) filters.push(gte(barbershop.rating, min));
+    }
+
+    const shops = await db.query.barbershop.findMany({
+      where: and(...filters),
+      orderBy: desc(barbershop.createdAt),
+      with: { photos: true, contacts: true, barbers: true, rates: true },
+    });
+
+    return res.status(200).json({ status: "success", data: { shops, hasMore: false } });
+  } catch (error) {
+    return res.status(500).json({ status: "error", message: error.message });
+  }
+});
 router.get("/users", authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { page = 1, search = "" } = req.query;
