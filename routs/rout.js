@@ -96,13 +96,13 @@ const publicLimiter = rateLimit({
 });
 
 const registerShopLimiter = rateLimit({
-  windowMs: 30 * 60 * 1000,
+  windowMs: 60 * 60 * 1000,
   standardHeaders: true, 
   legacyHeaders: false,
-  max: 3,
+  max: 5,
   message: {
     status: "error",
-    message: "Слишком много записей. Повторите через час.",
+    message: "Слишком много записей. Повторите через 60 минут",
   },
 });
 
@@ -237,7 +237,7 @@ const authMiddleware = async (req, res, next) => {
     try {
       const { userId, tokens } = await refreshTokens(res, refreshToken);
       req.userId = userId;
-      req.userRole = decoded?.role;
+      req.userRole = userRole;
       return next();
     } catch (e) {
       return res.status(401).json({ message: e.message });
@@ -443,10 +443,10 @@ router.get("/user", authMiddleware, async (req, res) => {
       where: eq(users.id, req.userId),
       columns: {
         name: true,
-        id: true,
         email: true,
         role: true,
         isVerified: true,
+        id: true,
         isBanned: true,
       },
       with: {
