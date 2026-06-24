@@ -86,7 +86,7 @@ const RegisterShopService = async (req) => {
       service: serviceName,   
     })
     .returning();
-
+  const barberPhone = barber.phone;
   const masterLine = masterName ? `<tr style="border-top:1px solid #27272a;">
     <td style="padding:8px 0;font-size:12px;color:#71717a;text-transform:uppercase;letter-spacing:0.06em;">Мастер</td>
     <td style="padding:8px 0;font-size:14px;color:#fafafa;font-weight:600;text-align:right;">${masterName}</td>
@@ -128,6 +128,10 @@ const RegisterShopService = async (req) => {
             <tr style="border-top:1px solid #27272a;">
               <td style="padding:8px 0;font-size:12px;color:#71717a;text-transform:uppercase;letter-spacing:0.06em;">Дата</td>
               <td style="padding:8px 0;font-size:14px;color:#fafafa;font-weight:600;text-align:right;">${date}</td>
+            </tr>
+               <tr style="border-top:1px solid #27272a;">
+              <td style="padding:8px 0;font-size:12px;color:#71717a;text-transform:uppercase;letter-spacing:0.06em;">Номер телефона</td>
+              <td style="padding:8px 0;font-size:14px;color:#fafafa;font-weight:600;text-align:right;">${barberphone ? barberphone : "Отсуствует"}</td>
             </tr>
             <tr style="border-top:1px solid #27272a;">
               <td style="padding:8px 0;font-size:12px;color:#71717a;text-transform:uppercase;letter-spacing:0.06em;">Время</td>
