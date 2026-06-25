@@ -96,13 +96,13 @@ const publicLimiter = rateLimit({
 });
 
 const registerShopLimiter = rateLimit({
-  windowMs: 30 * 60 * 1000,
+  windowMs: 60 * 60 * 1000,
   standardHeaders: true, 
   legacyHeaders: false,
-  max: 3,
+  max: 5,
   message: {
     status: "error",
-    message: "Слишком много записей. Повторите через час.",
+    message: "Слишком много записей. Повторите через 60 минут",
   },
 });
 
@@ -237,7 +237,7 @@ const authMiddleware = async (req, res, next) => {
     try {
       const { userId, tokens } = await refreshTokens(res, refreshToken);
       req.userId = userId;
-      req.userRole = decoded?.role;
+      req.userRole = userRole;
       return next();
     } catch (e) {
       return res.status(401).json({ message: e.message });
@@ -446,6 +446,7 @@ router.get("/user", authMiddleware, async (req, res) => {
         email: true,
         role: true,
         isVerified: true,
+        id: true,
         isBanned: true,
       },
       with: {
@@ -1354,5 +1355,88 @@ router.get('/admin/getdashboarddata', authMiddleware, adminMiddleware, async (re
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
+router.delete(
+  "/admin/cleanup/unverified",
+  authMiddleware,
+  adminMiddleware,
+  async (req, res) => {
+    try {
+      const cutoff = new Date(Date.now() - 5 * 60 * 1000);
+      const deleted = await db
+        .delete(users)
+        .where(
+          and(
+            eq(users.isVerified, false),
+            lte(users.createdAt, cutoff)
+          )
+        )
+        .returning({ id: users.id });
 
+      return res.status(200).json({
+        status: "success",
+        deleted: deleted.length,
+      });
+    } catch (e) {
+      return safeError(res, e);
+    }
+  }
+);
+
+router.post(
+  "/admin/subscription/warn-expiring",
+  authMiddleware,
+  adminMiddleware,
+  async (req, res) => {
+    try {
+      const { daysAhead = 3 } = req.body;
+      const days = Number(daysAhead);
+      if (isNaN(days) || days < 1 || days > 30) {
+        return res.status(400).json({ status: "error", message: "daysAhead должен быть от 1 до 30" });
+      }
+
+      const now = new Date();
+      const threshold = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+      const expiring = await db
+        .select({
+          id: barbershop.id,
+          name: barbershop.name,
+          ownerId: barbershop.ownerId,
+          subscriptionEndsAt: barbershop.subscriptionEndsAt,
+          subscriptionStatus: barbershop.subscriptionStatus,
+        })
+        .from(barbershop)
+        .where(
+          and(
+            eq(barbershop.subscriptionStatus, "active"),
+            lte(barbershop.subscriptionEndsAt, threshold),
+            gte(barbershop.subscriptionEndsAt, now)
+          )
+        );
+
+      if (expiring.length === 0) {
+        return res.status(200).json({ status: "success", notified: 0 });
+      }
+
+      await Promise.allSettled(
+        expiring
+          .filter((shop) => shop.ownerId)
+          .map((shop) =>
+            sendNotificationService({
+              to: shop.ownerId,
+              title: "Подписка истекает",
+              description: `Подписка барбершопа «${shop.name}» истекает ${new Date(shop.subscriptionEndsAt).toLocaleDateString("ru-RU")}. Продлите её, чтобы не потерять доступ к функциям.`,
+            })
+          )
+      );
+
+      return res.status(200).json({
+        status: "success",
+        notified: expiring.filter((s) => s.ownerId).length,
+      });
+    } catch (e) {
+      return safeError(res, e);
+    }
+  }
+);
 module.exports = router;

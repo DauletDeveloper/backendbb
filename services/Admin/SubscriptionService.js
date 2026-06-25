@@ -1,57 +1,101 @@
-const cron = require("node-cron");
 const { db } = require("../../db");
 const { barbershop } = require("../schema");
-const { eq, and, lte, gt } = require("drizzle-orm");
+const { eq } = require("drizzle-orm");
 const { sendNotificationService } = require("../Other/SendNotification");
 
 const TRIAL_DAYS = 30;
 const SUBSCRIPTION_PRICE = 5000;
-const ALMATY_TZ = "Asia/Almaty";
+const ALMATY_OFFSET_MS = 5 * 60 * 60 * 1000;
+const getNowAlmaty = () => {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60_000;
+  return new Date(utcMs + ALMATY_OFFSET_MS);
+};
 
-const getNowAlmaty = () =>
-  new Date(new Date().toLocaleString("en-US", { timeZone: ALMATY_TZ }));
+const addOneMonth = (date) => {
+  const d = new Date(date);
+  const originalDay = d.getDate();
+  d.setMonth(d.getMonth() + 1);
+  if (d.getDate() !== originalDay) d.setDate(0);
+  return d;
+};
+
+const validateShopId = (shopId) => {
+  const id = Number(shopId);
+  if (!Number.isInteger(id) || id <= 0)
+    throw new Error('Некорректный ID барбершопа');
+  return id;
+};
+
 
 async function startTrial(shopId) {
+  const id = validateShopId(shopId);
+
+  const [shop] = await db
+    .select()
+    .from(barbershop)
+    .where(eq(barbershop.id, id));
+
+  if (!shop) throw new Error('Барбершоп не найден');
+
+
+  if (shop.trialEndsAt !== null && shop.trialEndsAt !== undefined)
+    throw new Error('Пробный период уже был использован');
+
+  if (shop.subscriptionStatus === 'active')
+    throw new Error('У барбершопа уже есть активная подписка');
+
   const trialEndsAt = getNowAlmaty();
   trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_DAYS);
 
   await db
     .update(barbershop)
-    .set({ subscriptionStatus: "trial", trialEndsAt })
-    .where(eq(barbershop.id, shopId));
+    .set({ subscriptionStatus: 'trial', trialEndsAt })
+    .where(eq(barbershop.id, id));
 }
+
 
 async function activateSubscription(shopId) {
+  const id = validateShopId(shopId);
   const now = getNowAlmaty();
 
-  const [shop] = await db
-    .select()
-    .from(barbershop)
-    .where(eq(barbershop.id, shopId));
+  let notifyOwnerId = null;
+  let notifyDate = null;
 
-  if (!shop) throw new Error("Барбершоп не найден");
+  await db.transaction(async (tx) => {
+    const [shop] = await tx
+      .select()
+      .from(barbershop)
+      .where(eq(barbershop.id, id))
+      .for('update'); 
 
-  const base =
-    shop.subscriptionEndsAt && new Date(shop.subscriptionEndsAt) > now
-      ? new Date(shop.subscriptionEndsAt)
-      : now;
+    if (!shop) throw new Error('Барбершоп не найден');
 
-  const subscriptionEndsAt = new Date(base);
-  subscriptionEndsAt.setMonth(subscriptionEndsAt.getMonth() + 1);
+    const base =
+      shop.subscriptionEndsAt && new Date(shop.subscriptionEndsAt) > now
+        ? new Date(shop.subscriptionEndsAt)
+        : now;
 
-  await db
-    .update(barbershop)
-    .set({ subscriptionStatus: "active", subscriptionEndsAt })
-    .where(eq(barbershop.id, shopId));
+    const subscriptionEndsAt = addOneMonth(base);
 
-  if (shop.ownerId) {
-    await sendNotificationService({
-      to: shop.ownerId,
-      title: "Подписка активирована",
-      text: `Доступ к платформе продлён до ${subscriptionEndsAt.toLocaleDateString("ru-RU")}.`,
-    });
+    await tx
+      .update(barbershop)
+      .set({ subscriptionStatus: 'active', subscriptionEndsAt })
+      .where(eq(barbershop.id, id));
+    notifyOwnerId = shop.ownerId;
+    notifyDate = subscriptionEndsAt;
+  });
+  if (notifyOwnerId) {
+    try {
+      await sendNotificationService({
+        to: notifyOwnerId,
+        title: 'Подписка активирована',
+        text: `Доступ к платформе продлён до ${notifyDate.toLocaleDateString('ru-RU')}.`,
+      });
+    } catch (err) {
+      console.error('[activateSubscription] Ошибка отправки уведомления:', err);
+    }
   }
 }
-
 
 module.exports = { startTrial, activateSubscription, SUBSCRIPTION_PRICE };

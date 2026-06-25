@@ -66,15 +66,16 @@ const EditEmailService = async (req) => {
     .from(users)
     .where(eq(users.pendingEmail, email.trim()));
   if (existingPending) throw new Error('Email уже занят');
-
-  const userCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const { randomInt } = require('crypto');
+  const code = String(randomInt(100000, 1000000));
+  const userCode = JSON.stringify({ code, exp: Date.now() + 5 * 60 * 1000 });
 
   await db
     .update(users)
     .set({ pendingEmail: email.trim(), userCode })
     .where(eq(users.id, userId));
 
-  await sendVerificationCode(email.trim(), userCode);
+  await sendVerificationCode(email.trim(), code);
 };
 
 const EditPayoutMethodService = async (req) => {
@@ -104,9 +105,25 @@ const VerifyEmailService = async (req) => {
   const [user] = await db
     .select()
     .from(users)
-    .where(and(eq(users.id, userId), eq(users.userCode, code)));
+    .where(eq(users.id, userId));
 
-  if (!user) throw new Error('Неверный код');
+  if (!user) throw new Error('Пользователь не найден');
+
+  let parsed;
+  try {
+    parsed = JSON.parse(user.userCode);
+  } catch {
+    throw new Error('Неверный код');
+  }
+
+  if (!parsed || Date.now() > parsed.exp) throw new Error('Код истёк');
+
+  const { timingSafeEqual } = require('crypto');
+  const bufA = Buffer.from(String(parsed.code));
+  const bufB = Buffer.from(String(code));
+  const isMatch = bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+  if (!isMatch) throw new Error('Неверный код');
+
   if (!user.pendingEmail) throw new Error('Нет ожидающего email');
 
   await db

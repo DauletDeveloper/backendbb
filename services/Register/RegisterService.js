@@ -30,6 +30,8 @@ const RegisterService = async (name, email, password) => {
         name,
         password: hashedPassword,
         isVerified: false,
+        pendingEmail: null,
+        userCode: null
       },
     })
     .returning();
