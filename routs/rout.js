@@ -110,7 +110,7 @@ const emailLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   standardHeaders: true, 
   legacyHeaders: false,
-  max: 5,
+  max: 50,
   message: {
     status: "error",
     message: "Слишком много запросов на смену email.",
