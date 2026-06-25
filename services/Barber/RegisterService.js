@@ -21,7 +21,6 @@ const normalizePhone = (phone) => {
   return null;
 };
 
-
 const escapeHtml = (str) =>
   String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -29,7 +28,6 @@ const escapeHtml = (str) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#x27;');
-
 
 const RegisterShopService = async (req) => {
   const {
@@ -45,25 +43,17 @@ const RegisterShopService = async (req) => {
   const userId = req.userId ?? null;
   const isGuest = userId === null;
 
-
   if (!barberId || !date || !appointmentTime || !serviceName)
     throw new Error('Барбершоп, дата, время записи и сервис обязательны');
   if (!masterId) throw new Error('Выберите мастера');
-
-
-  const barberIdNum = Number(barberId);
-  if (!Number.isInteger(barberIdNum) || barberIdNum <= 0)
-    throw new Error('Некорректный ID барбершопа');
 
   const masterIdNum = Number(masterId);
   if (!Number.isInteger(masterIdNum) || masterIdNum <= 0)
     throw new Error('Некорректный ID мастера');
 
-
   const trimmedService = String(serviceName).trim();
   if (trimmedService.length < 2 || trimmedService.length > 100)
     throw new Error('Некорректное название услуги');
-
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
     throw new Error('Некорректный формат даты');
@@ -92,14 +82,9 @@ const RegisterShopService = async (req) => {
   if (appointmentDate > maxDate)
     throw new Error('Нельзя записаться более чем на 3 дня вперёд');
 
-
-  const [barber] = await db
-    .select()
-    .from(barbershop)
-    .where(eq(barbershop.id, barberIdNum));
+  const [barber] = await db.select().from(barbershop).where(eq(barbershop.id, barberId));
   if (!barber) throw new Error('Барбершоп не найден');
   if (!barber.isVerified) throw new Error('Барбершоп временно недоступен');
-
 
   let clientPhone = null;
   let clientName = 'Гость';
@@ -132,7 +117,7 @@ const RegisterShopService = async (req) => {
   const [master] = await db
     .select()
     .from(barberProfile)
-    .where(and(eq(barberProfile.id, masterIdNum), eq(barberProfile.barberId, barberIdNum)));
+    .where(and(eq(barberProfile.id, masterIdNum), eq(barberProfile.barberId, barberId)));
   if (!master) throw new Error('Барбер не найден в этом магазине');
 
   const masterName = master.name;
@@ -141,16 +126,13 @@ const RegisterShopService = async (req) => {
     ? `${appointmentTime}:00`
     : appointmentTime;
 
-  
   const [newRegister] = await db.transaction(async (tx) => {
-
-
     const existingSlot = await tx
       .select()
       .from(register)
       .where(
         and(
-          eq(register.barberId, barberIdNum),
+          eq(register.barberId, barberId),
           eq(register.registerTo, masterIdNum),
           eq(register.date, new Date(date)),
           eq(register.time, timeValue)
@@ -159,17 +141,16 @@ const RegisterShopService = async (req) => {
     if (existingSlot.length > 0)
       throw new Error('Это время уже занято, выберите другое');
 
-
     await tx
       .update(barbershop)
       .set({ totalClients: sql`${barbershop.totalClients} + 1` })
-      .where(eq(barbershop.id, barberIdNum));
+      .where(eq(barbershop.id, barberId));
 
     return tx
       .insert(register)
       .values({
         userId: isGuest ? null : userId,
-        barberId: barberIdNum,
+        barberId,
         date: new Date(date),
         time: timeValue,
         registerTo: masterIdNum,
@@ -177,7 +158,6 @@ const RegisterShopService = async (req) => {
       })
       .returning();
   });
-
 
   const safeClientName  = escapeHtml(clientName);
   const safeClientPhone = escapeHtml(clientPhone);
@@ -228,7 +208,6 @@ const RegisterShopService = async (req) => {
         </div>
       </div>
     </div>`;
-
 
   try {
     await transporter.sendMail({
